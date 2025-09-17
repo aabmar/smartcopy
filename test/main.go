@@ -112,9 +112,58 @@ func runTests() error {
 	}
 	fmt.Printf("  Expected error output: %s", string(output))
 
-	// 11: Clean up any existing test directories
-	fmt.Println("\n11. Cleaning up existing test directories...")
+	// Test 8: Copy directory into existing directory (new cp-like behavior)
+	fmt.Println("\n11. Test 8: Copy directory into existing directory")
+	if err := os.MkdirAll(joinRoot("existing_dir"), 0755); err != nil {
+		return fmt.Errorf("failed to create existing directory: %w", err)
+	}
+	fmt.Println("Running: smartcopy test_src existing_dir (should create existing_dir/test_src/)")
+	if err := runSmartcopy(joinRoot("smartcopy.exe"), joinRoot("test_src"), joinRoot("existing_dir")); err != nil {
+		return fmt.Errorf("copy to existing directory failed: %w", err)
+	}
+
+	// Verify the directory structure is correct
+	if err := verifyDirectoryStructure(joinRoot("existing_dir", "test_src"), joinRoot); err != nil {
+		return fmt.Errorf("directory structure verification failed: %w", err)
+	}
+
+	// Test 9: Copy file into existing directory
+	fmt.Println("\n12. Test 9: Copy file into existing directory")
+	if err := os.MkdirAll(joinRoot("file_dest_dir"), 0755); err != nil {
+		return fmt.Errorf("failed to create file destination directory: %w", err)
+	}
+	fmt.Println("Running: smartcopy test_src/file1.txt file_dest_dir (should create file_dest_dir/file1.txt)")
+	if err := runSmartcopy(joinRoot("smartcopy.exe"), joinRoot("test_src", "file1.txt"), joinRoot("file_dest_dir")); err != nil {
+		return fmt.Errorf("copy file to existing directory failed: %w", err)
+	}
+
+	// Verify the file was placed correctly
+	expectedFile := joinRoot("file_dest_dir", "file1.txt")
+	if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
+		return fmt.Errorf("expected file %s was not created", expectedFile)
+	}
+	fmt.Printf("  ✓ Verified: File correctly placed at %s\n", expectedFile)
+
+	// Test 10: Copy to non-existing path (should create with source name)
+	fmt.Println("\n13. Test 10: Copy to non-existing path")
+	fmt.Println("Running: smartcopy test_src/file1.txt new_file_copy.txt")
+	if err := runSmartcopy(joinRoot("smartcopy.exe"), joinRoot("test_src", "file1.txt"), joinRoot("new_file_copy.txt")); err != nil {
+		return fmt.Errorf("copy to new path failed: %w", err)
+	}
+
+	// Verify the file was created with the specified name
+	expectedNewFile := joinRoot("new_file_copy.txt")
+	if _, err := os.Stat(expectedNewFile); os.IsNotExist(err) {
+		return fmt.Errorf("expected file %s was not created", expectedNewFile)
+	}
+	fmt.Printf("  ✓ Verified: File correctly created as %s\n", expectedNewFile)
+
+	// Clean up test directories
+	fmt.Println("\n14. Cleaning up test directories...")
 	cleanupTestDirs(joinRoot)
+	os.RemoveAll(joinRoot("existing_dir"))
+	os.RemoveAll(joinRoot("file_dest_dir"))
+	os.RemoveAll(joinRoot("new_file_copy.txt"))
 
 	return nil
 }
@@ -232,5 +281,26 @@ func runSmartcopy(binPath, src, dst string) error {
 		return fmt.Errorf("smartcopy failed: %v", err)
 	}
 
+	return nil
+}
+
+func verifyDirectoryStructure(basePath string, joinRoot func(parts ...string) string) error {
+	// Check that the expected files exist in the copied directory structure
+	expectedFiles := []string{
+		filepath.Join(basePath, "file1.txt"),
+		filepath.Join(basePath, "file2.txt"),
+		filepath.Join(basePath, "small.txt"),
+		filepath.Join(basePath, "large.dat"),
+		filepath.Join(basePath, "subdir", "nested.txt"),
+		filepath.Join(basePath, "subdir", "nested2.txt"),
+	}
+
+	for _, file := range expectedFiles {
+		if _, err := os.Stat(file); os.IsNotExist(err) {
+			return fmt.Errorf("expected file %s does not exist", file)
+		}
+	}
+
+	fmt.Printf("  ✓ Verified: Directory structure correctly created at %s\n", basePath)
 	return nil
 }

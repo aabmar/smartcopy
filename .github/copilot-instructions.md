@@ -8,3 +8,12 @@ Please read the /README.md file for more information about current status. Pleas
 
 If you do not complete a task in one batch, please update the TODO list in README.md to reflect what is left to do. It is important to not forget if we leave something of the requested task undone.
 
+The main file is in main.go
+
+The tests are in test/main.go
+
+
+Please update the test file, not add new test files or batch files.
+
+- You can run the test file with "make test"
+- you can build the main file with "make build"

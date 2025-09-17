@@ -35,6 +35,15 @@ func run() error {
 	// Validate source exists
 	if _, err := os.Stat(from); os.IsNotExist(err) {
 		return fmt.Errorf("source '%s' does not exist", from)
+	} else if err != nil {
+		return fmt.Errorf("failed to get source info: %w", err)
+	}
+
+	// Adjust destination path based on standard cp behavior
+	// If destination exists and is a directory, put source inside it
+	if dstInfo, err := os.Stat(to); err == nil && dstInfo.IsDir() {
+		srcName := filepath.Base(from)
+		to = filepath.Join(to, srcName)
 	}
 
 	// Initialize statistics
