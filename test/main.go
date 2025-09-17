@@ -112,6 +112,10 @@ func runTests() error {
 	}
 	fmt.Printf("  Expected error output: %s", string(output))
 
+	// 11: Clean up any existing test directories
+	fmt.Println("\n11. Cleaning up existing test directories...")
+	cleanupTestDirs(joinRoot)
+
 	return nil
 }
 
