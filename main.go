@@ -25,25 +25,30 @@ func main() {
 
 func run() error {
 	args := os.Args[1:]
-	if len(args) != 2 {
-		return fmt.Errorf("usage: smartcopy <from> <to>")
+	if len(args) < 2 {
+		return fmt.Errorf("usage: smartcopy <source1> [source2...] <destination>")
 	}
 
-	from := args[0]
-	to := args[1]
+	// Last argument is destination, everything else is sources
+	sources := args[:len(args)-1]
+	destination := args[len(args)-1]
 
-	// Validate source exists
-	if _, err := os.Stat(from); os.IsNotExist(err) {
-		return fmt.Errorf("source '%s' does not exist", from)
-	} else if err != nil {
-		return fmt.Errorf("failed to get source info: %w", err)
+	// Validate all sources exist
+	for _, source := range sources {
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			return fmt.Errorf("source '%s' does not exist", source)
+		} else if err != nil {
+			return fmt.Errorf("failed to get source info for '%s': %w", source, err)
+		}
 	}
 
-	// Adjust destination path based on standard cp behavior
-	// If destination exists and is a directory, put source inside it
-	if dstInfo, err := os.Stat(to); err == nil && dstInfo.IsDir() {
-		srcName := filepath.Base(from)
-		to = filepath.Join(to, srcName)
+	// Check if destination exists and is a directory
+	destInfo, destErr := os.Stat(destination)
+	isDestDir := destErr == nil && destInfo.IsDir()
+
+	// For multiple sources, destination must be a directory (or will be created as one)
+	if len(sources) > 1 && destErr == nil && !isDestDir {
+		return fmt.Errorf("when copying multiple sources, destination must be a directory")
 	}
 
 	// Initialize statistics
@@ -51,8 +56,35 @@ func run() error {
 		StartTime: time.Now(),
 	}
 
-	if err := copyRecursively(from, to, stats); err != nil {
-		return err
+	// Copy each source
+	for _, source := range sources {
+		var targetPath string
+
+		if len(sources) == 1 {
+			// Single source: use standard cp behavior
+			if isDestDir {
+				// Destination exists and is directory: put source inside it
+				srcName := filepath.Base(source)
+				targetPath = filepath.Join(destination, srcName)
+			} else {
+				// Destination doesn't exist or is file: use as-is
+				targetPath = destination
+			}
+		} else {
+			// Multiple sources: always put inside destination directory
+			if destErr != nil {
+				// Destination doesn't exist, create it as directory
+				if err := os.MkdirAll(destination, 0755); err != nil {
+					return fmt.Errorf("failed to create destination directory '%s': %w", destination, err)
+				}
+			}
+			srcName := filepath.Base(source)
+			targetPath = filepath.Join(destination, srcName)
+		}
+
+		if err := copyRecursively(source, targetPath, stats); err != nil {
+			return err
+		}
 	}
 
 	// Display summary statistics

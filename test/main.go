@@ -158,12 +158,80 @@ func runTests() error {
 	}
 	fmt.Printf("  ✓ Verified: File correctly created as %s\n", expectedNewFile)
 
+	// Test 11: Multiple sources to existing directory
+	fmt.Println("\n14. Test 11: Multiple sources to existing directory")
+	if err := createMultipleTestSources(joinRoot); err != nil {
+		return fmt.Errorf("failed to create multiple test sources: %w", err)
+	}
+	if err := os.MkdirAll(joinRoot("multi_dest"), 0755); err != nil {
+		return fmt.Errorf("failed to create multi destination directory: %w", err)
+	}
+	fmt.Println("Running: smartcopy src1 src2 src3 multi_dest")
+	if err := runMultiSmartcopy(joinRoot("smartcopy.exe"), []string{
+		joinRoot("src1"), joinRoot("src2"), joinRoot("src3"), joinRoot("multi_dest"),
+	}); err != nil {
+		return fmt.Errorf("multiple sources copy failed: %w", err)
+	}
+
+	// Verify all sources were copied into destination
+	expectedPaths := []string{
+		joinRoot("multi_dest", "src1"),
+		joinRoot("multi_dest", "src2"),
+		joinRoot("multi_dest", "src3"),
+	}
+	for _, path := range expectedPaths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return fmt.Errorf("expected path %s was not created", path)
+		}
+	}
+	fmt.Printf("  ✓ Verified: All sources correctly copied to multi_dest\n")
+
+	// Test 12: Multiple sources to non-existing directory (should create it)
+	fmt.Println("\n15. Test 12: Multiple sources to non-existing directory")
+	fmt.Println("Running: smartcopy src1 src2 new_multi_dest")
+	if err := runMultiSmartcopy(joinRoot("smartcopy.exe"), []string{
+		joinRoot("src1"), joinRoot("src2"), joinRoot("new_multi_dest"),
+	}); err != nil {
+		return fmt.Errorf("multiple sources to new directory failed: %w", err)
+	}
+
+	// Verify destination was created and sources copied
+	newExpectedPaths := []string{
+		joinRoot("new_multi_dest", "src1"),
+		joinRoot("new_multi_dest", "src2"),
+	}
+	for _, path := range newExpectedPaths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return fmt.Errorf("expected path %s was not created", path)
+		}
+	}
+	fmt.Printf("  ✓ Verified: Multiple sources copied to new directory\n")
+
+	// Test 13: Multiple sources to existing file (should fail)
+	fmt.Println("\n16. Test 13: Multiple sources to existing file (should fail)")
+	if err := createFile(joinRoot("existing_file.txt"), "existing file"); err != nil {
+		return fmt.Errorf("failed to create existing file: %w", err)
+	}
+	fmt.Println("Running: smartcopy src1 src2 existing_file.txt (should fail)")
+	cmd2 := exec.Command(joinRoot("smartcopy.exe"), joinRoot("src1"), joinRoot("src2"), joinRoot("existing_file.txt"))
+	output2, err2 := cmd2.CombinedOutput()
+	if err2 == nil {
+		return fmt.Errorf("expected error when copying multiple sources to file, but command succeeded")
+	}
+	fmt.Printf("  Expected error output: %s", string(output2))
+
 	// Clean up test directories
-	fmt.Println("\n14. Cleaning up test directories...")
+	fmt.Println("\n17. Cleaning up test directories...")
 	cleanupTestDirs(joinRoot)
 	os.RemoveAll(joinRoot("existing_dir"))
 	os.RemoveAll(joinRoot("file_dest_dir"))
 	os.RemoveAll(joinRoot("new_file_copy.txt"))
+	os.RemoveAll(joinRoot("src1"))
+	os.RemoveAll(joinRoot("src2"))
+	os.RemoveAll(joinRoot("src3"))
+	os.RemoveAll(joinRoot("multi_dest"))
+	os.RemoveAll(joinRoot("new_multi_dest"))
+	os.RemoveAll(joinRoot("existing_file.txt"))
 
 	return nil
 }
@@ -302,5 +370,54 @@ func verifyDirectoryStructure(basePath string, joinRoot func(parts ...string) st
 	}
 
 	fmt.Printf("  ✓ Verified: Directory structure correctly created at %s\n", basePath)
+	return nil
+}
+
+func createMultipleTestSources(joinRoot func(parts ...string) string) error {
+	// Create src1 directory with files
+	if err := os.MkdirAll(joinRoot("src1"), 0755); err != nil {
+		return err
+	}
+	if err := createFile(joinRoot("src1", "file_a.txt"), "Content of file A in src1"); err != nil {
+		return err
+	}
+	if err := createFile(joinRoot("src1", "file_b.txt"), "Content of file B in src1"); err != nil {
+		return err
+	}
+
+	// Create src2 directory with files
+	if err := os.MkdirAll(joinRoot("src2"), 0755); err != nil {
+		return err
+	}
+	if err := createFile(joinRoot("src2", "doc.txt"), "Document in src2"); err != nil {
+		return err
+	}
+
+	// Create src3 as a single file
+	if err := createFile(joinRoot("src3"), "This is src3 as a file"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runMultiSmartcopy(binPath string, args []string) error {
+	cmd := exec.Command(binPath, args...)
+	output, err := cmd.CombinedOutput()
+
+	// Always show the output (including summary)
+	outputStr := string(output)
+	if outputStr != "" {
+		// Add indentation for better readability
+		lines := strings.Split(strings.TrimSpace(outputStr), "\n")
+		for _, line := range lines {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("smartcopy failed: %v", err)
+	}
+
 	return nil
 }

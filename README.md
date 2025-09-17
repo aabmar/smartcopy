@@ -15,7 +15,11 @@ A command line utility for efficiently copying files and directories recursively
 ## Usage
 
 ```bash
+# Single source
 smartcopy <from> <to>
+
+# Multiple sources (last argument is destination)
+smartcopy <source1> <source2> <source3> <destination>
 ```
 
 ### Examples
@@ -27,12 +31,32 @@ smartcopy ./source ./destination
 # Copy a single file
 smartcopy ./file.txt ./backup/file.txt
 
+# Copy multiple sources to destination (great for backups)
+smartcopy ./documents ./photos ./projects ./backup/
+
 # Update an existing backup (only copies changed files)
 smartcopy ./project ./backup/project
 ```
 
-## Building
+## Building and Testing
 
+Use the included Makefile for common tasks:
+
+```bash
+# Build the executable
+make build
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+
+# Run directly with go
+make run
+```
+
+Or use Go commands directly:
 ```bash
 go build -o smartcopy.exe
 ```
