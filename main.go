@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,19 @@ import (
 
 // CopyStats tracks statistics during the copy operation
 type CopyStats struct {
-	FilesCopied  int
-	FilesSkipped int
-	BytesCopied  int64
-	StartTime    time.Time
+	FilesCopied     int
+	FilesSkipped    int
+	BytesCopied     int64
+	ExtraFound      int
+	ExtraDeleted    int
+	ExtraBytes      int64
+	StartTime       time.Time
+}
+
+// SyncOptions holds the synchronization configuration
+type SyncOptions struct {
+	DetectExtra bool
+	DeleteExtra bool
 }
 
 func main() {
@@ -24,9 +34,30 @@ func main() {
 }
 
 func run() error {
-	args := os.Args[1:]
+	var detectExtra = flag.Bool("d", false, "detect extra files in destination not present in source")
+	var deleteExtra = flag.Bool("D", false, "detect and delete extra files in destination not present in source")
+	
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] <source1> [source2...] <destination>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  %s source dest              # Basic copy\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -d source dest           # Copy and detect extra files\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -D source dest           # Copy and delete extra files\n", os.Args[0])
+	}
+	
+	flag.Parse()
+	args := flag.Args()
+	
 	if len(args) < 2 {
-		return fmt.Errorf("usage: smartcopy <source1> [source2...] <destination>")
+		flag.Usage()
+		return fmt.Errorf("insufficient arguments")
+	}
+
+	syncOptions := &SyncOptions{
+		DetectExtra: *detectExtra || *deleteExtra, // -D implies -d
+		DeleteExtra: *deleteExtra,
 	}
 
 	// Last argument is destination, everything else is sources
@@ -87,8 +118,27 @@ func run() error {
 		}
 	}
 
+	// Handle extra file detection/deletion for single source scenarios
+	if len(sources) == 1 && syncOptions.DetectExtra {
+		source := sources[0]
+		var finalDestination string
+		
+		if isDestDir {
+			// Source was copied into the destination directory
+			srcName := filepath.Base(source)
+			finalDestination = filepath.Join(destination, srcName)
+		} else {
+			// Source was copied as the destination
+			finalDestination = destination
+		}
+		
+		if err := handleExtraFiles(source, finalDestination, syncOptions, stats); err != nil {
+			return err
+		}
+	}
+
 	// Display summary statistics
-	showSummary(stats)
+	showSummary(stats, syncOptions)
 	return nil
 }
 
@@ -162,17 +212,159 @@ func formatSpeed(bytesPerSec float64) string {
 	}
 }
 
+// handleExtraFiles handles detection and optional deletion of extra files in destination
+func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStats) error {
+	// Build a map of all files/directories that should exist in destination
+	sourceItems := make(map[string]bool)
+	
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source '%s': %w", src, err)
+	}
+	
+	if srcInfo.IsDir() {
+		err = filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			
+			// Get relative path from source root
+			relPath, err := filepath.Rel(src, path)
+			if err != nil {
+				return err
+			}
+			
+			// Skip the root directory itself
+			if relPath == "." {
+				return nil
+			}
+			
+			sourceItems[relPath] = true
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to walk source directory '%s': %w", src, err)
+		}
+	} else {
+		// For single files, we just check if the destination file matches
+		return nil // No extra files to handle for single file copy
+	}
+	
+	// Now check destination for extra files
+	var extraFiles []string
+	var extraDirs []string
+	
+	err = filepath.Walk(dst, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			// If we can't access a file, skip it but don't fail
+			return nil
+		}
+		
+		// Get relative path from destination root
+		relPath, err := filepath.Rel(dst, path)
+		if err != nil {
+			return err
+		}
+		
+		// Skip the root directory itself
+		if relPath == "." {
+			return nil
+		}
+		
+		// Check if this item exists in source
+		if !sourceItems[relPath] {
+			if info.IsDir() {
+				extraDirs = append(extraDirs, path)
+				// Skip walking inside this directory since we'll delete it entirely
+				return filepath.SkipDir
+			} else {
+				extraFiles = append(extraFiles, path)
+				
+				// Add to statistics
+				stats.ExtraFound++
+				stats.ExtraBytes += info.Size()
+			}
+		}
+		
+		return nil
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to walk destination directory '%s': %w", dst, err)
+	}
+	
+	// Add directory statistics
+	for range extraDirs {
+		stats.ExtraFound++
+	}
+	
+	// Report extra files found
+	if len(extraFiles) > 0 || len(extraDirs) > 0 {
+		fmt.Printf("\nExtra files/directories found in destination:\n")
+		for _, file := range extraFiles {
+			fmt.Printf("  FILE: %s\n", file)
+		}
+		for _, dir := range extraDirs {
+			fmt.Printf("  DIR:  %s\n", dir)
+		}
+	}
+	
+	// Delete if requested
+	if syncOptions.DeleteExtra {
+		if len(extraFiles) > 0 || len(extraDirs) > 0 {
+			fmt.Printf("\nDeleting extra files/directories...\n")
+		}
+		
+		// Delete files first
+		for _, file := range extraFiles {
+			if err := os.Remove(file); err != nil {
+				fmt.Printf("  WARNING: Failed to delete file '%s': %v\n", file, err)
+			} else {
+				fmt.Printf("  DELETED: %s\n", file)
+				stats.ExtraDeleted++
+			}
+		}
+		
+		// Delete directories (they should be empty after deleting files)
+		for _, dir := range extraDirs {
+			if err := os.RemoveAll(dir); err != nil {
+				fmt.Printf("  WARNING: Failed to delete directory '%s': %v\n", dir, err)
+			} else {
+				fmt.Printf("  DELETED: %s\n", dir)
+				stats.ExtraDeleted++
+			}
+		}
+	}
+	
+	return nil
+}
+
 // showSummary displays the final statistics
-func showSummary(stats *CopyStats) {
+func showSummary(stats *CopyStats, syncOptions *SyncOptions) {
 	totalTime := time.Since(stats.StartTime)
 	overallSpeed := float64(stats.BytesCopied) / totalTime.Seconds()
 
-	fmt.Printf("\nSummary: %d files copied, %d files skipped, %s copied in %v (%s)\n",
+	fmt.Printf("\nSummary: %d files copied, %d files skipped, %s copied in %v (%s)",
 		stats.FilesCopied,
 		stats.FilesSkipped,
 		formatBytes(stats.BytesCopied),
 		totalTime.Round(time.Millisecond),
 		formatSpeed(overallSpeed))
+	
+	// Add extra files information if sync options are enabled
+	if syncOptions.DetectExtra {
+		if syncOptions.DeleteExtra {
+			fmt.Printf(", %d extra items deleted", stats.ExtraDeleted)
+		} else {
+			fmt.Printf(", %d extra items found", stats.ExtraFound)
+		}
+		
+		if stats.ExtraBytes > 0 {
+			fmt.Printf(" (%s)", formatBytes(stats.ExtraBytes))
+		}
+	}
+	
+	fmt.Printf("\n")
 }
 
 // copyFile copies a single file from src to dst if needed

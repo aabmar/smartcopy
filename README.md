@@ -6,6 +6,7 @@ A command line utility for efficiently copying files and directories recursively
 
 - **Recursive copying**: Copies directories and all their contents
 - **Smart skipping**: Only copies files that have changed (different size or modification date)
+- **Synchronization options**: Detect and optionally delete extra files in destination
 - **Cross-platform**: Written in Go for Windows, macOS, and Linux
 - **Progress reporting**: Shows each file being processed and bytes transferred
 - **Date preservation**: Maintains original file modification times
@@ -15,17 +16,18 @@ A command line utility for efficiently copying files and directories recursively
 ## Usage
 
 ```bash
-# Single source
-smartcopy <from> <to>
+# Basic copying
+smartcopy [options] <source1> [source2...] <destination>
 
-# Multiple sources (last argument is destination)
-smartcopy <source1> <source2> <source3> <destination>
+# Options:
+#   -d    detect extra files in destination not present in source
+#   -D    detect and delete extra files in destination not present in source
 ```
 
 ### Examples
 
 ```bash
-# Copy a directory recursively
+# Basic copying - Copy a directory recursively
 smartcopy ./source ./destination
 
 # Copy a single file
@@ -36,7 +38,25 @@ smartcopy ./documents ./photos ./projects ./backup/
 
 # Update an existing backup (only copies changed files)
 smartcopy ./project ./backup/project
+
+# Synchronization - Detect extra files in destination
+smartcopy -d ./source ./backup
+
+# Complete synchronization - Remove extra files from destination
+smartcopy -D ./source ./backup
+
+# Perfect for maintaining a mirror backup
+smartcopy -D ./important_docs ./backup/important_docs
 ```
+
+### Synchronization Features
+
+The `-d` and `-D` flags provide powerful synchronization capabilities perfect for backup scenarios:
+
+- **`-d` (detect)**: Lists extra files/directories in destination that don't exist in source
+- **`-D` (delete)**: Same as `-d` but also deletes the extra files/directories
+
+This ensures your backup destination stays in perfect sync with the source, removing outdated files that are no longer needed.
 
 ## Building and Testing
 
