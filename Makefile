@@ -18,12 +18,9 @@ clean:
 	@echo "Clean complete"
 
 clean-all:
-ifeq ($(OS),Windows_NT)
-	@if exist smartcopy.exe del /q smartcopy.exe
-	@if exist smartcopy del /q smartcopy
-else
-	@rm -f smartcopy smartcopy.exe
-endif
+	@echo "Cleaning all binaries..."
+	@go clean
+	@echo "All binaries cleaned"
 
 run: 
 	go run main.go
@@ -45,4 +42,4 @@ build-darwin:
 build-all: build-windows build-linux build-darwin
 	@echo "All platform builds complete"
 
-.PHONY: build clean run test build-windows build-linux build-darwin build-all
+.PHONY: build clean clean-all run test build-windows build-linux build-darwin build-all
