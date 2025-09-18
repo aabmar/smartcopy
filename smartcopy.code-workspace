@@ -5,6 +5,8 @@
 		}
 	],
 	"settings": {
+		"terminal.integrated.shellIntegration.enabled": true,
+
 		"chat.tools.terminal.autoApprove": {
 			"/.*/": true,
 			"cd": true,
@@ -104,6 +106,9 @@
 			"eval": false,
 			"Invoke-Expression": false,
 			"iex": false
-		}
+		},
+		"github.copilot.chat.agent.thinkingTool": true,
+		"github.copilot.chat.languageContext.typescript.enabled": true,
+		"github.copilot.chat.newWorkspace.useContext7": true
 	}
 }
