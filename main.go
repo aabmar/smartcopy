@@ -9,15 +9,18 @@ import (
 	"time"
 )
 
+// Version of the utility
+const Version = "1.2.1"
+
 // CopyStats tracks statistics during the copy operation
 type CopyStats struct {
-	FilesCopied     int
-	FilesSkipped    int
-	BytesCopied     int64
-	ExtraFound      int
-	ExtraDeleted    int
-	ExtraBytes      int64
-	StartTime       time.Time
+	FilesCopied  int
+	FilesSkipped int
+	BytesCopied  int64
+	ExtraFound   int
+	ExtraDeleted int
+	ExtraBytes   int64
+	StartTime    time.Time
 }
 
 // SyncOptions holds the synchronization configuration
@@ -36,7 +39,7 @@ func main() {
 func run() error {
 	var detectExtra = flag.Bool("d", false, "detect extra files in destination not present in source")
 	var deleteExtra = flag.Bool("D", false, "detect and delete extra files in destination not present in source")
-	
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] <source1> [source2...] <destination>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
@@ -46,12 +49,13 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "  %s -d source dest           # Copy and detect extra files\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -D source dest           # Copy and delete extra files\n", os.Args[0])
 	}
-	
+
 	flag.Parse()
 	args := flag.Args()
-	
+
 	if len(args) < 2 {
 		flag.Usage()
+		fmt.Printf("Version: %s\n", Version)
 		return fmt.Errorf("insufficient arguments")
 	}
 
@@ -122,7 +126,7 @@ func run() error {
 	if len(sources) == 1 && syncOptions.DetectExtra {
 		source := sources[0]
 		var finalDestination string
-		
+
 		if isDestDir {
 			// Source was copied into the destination directory
 			srcName := filepath.Base(source)
@@ -131,7 +135,7 @@ func run() error {
 			// Source was copied as the destination
 			finalDestination = destination
 		}
-		
+
 		if err := handleExtraFiles(source, finalDestination, syncOptions, stats); err != nil {
 			return err
 		}
@@ -162,11 +166,6 @@ func copyDirectory(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error
 		return fmt.Errorf("failed to create directory '%s': %w", dst, err)
 	}
 
-	// Copy directory modification time
-	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
-		return fmt.Errorf("failed to set directory times for '%s': %w", dst, err)
-	}
-
 	// Read directory entries
 	entries, err := os.ReadDir(src)
 	if err != nil {
@@ -181,6 +180,12 @@ func copyDirectory(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error
 		if err := copyRecursively(srcPath, dstPath, stats); err != nil {
 			return err
 		}
+	}
+
+	// After all contents are copied, set directory modification time to match source
+	timeZero := time.Time{}
+	if err := os.Chtimes(dst, timeZero, srcInfo.ModTime()); err != nil {
+		return fmt.Errorf("failed to set directory times for '%s': %w", dst, err)
 	}
 
 	return nil
@@ -216,29 +221,29 @@ func formatSpeed(bytesPerSec float64) string {
 func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStats) error {
 	// Build a map of all files/directories that should exist in destination
 	sourceItems := make(map[string]bool)
-	
+
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("failed to stat source '%s': %w", src, err)
 	}
-	
+
 	if srcInfo.IsDir() {
 		err = filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			
+
 			// Get relative path from source root
 			relPath, err := filepath.Rel(src, path)
 			if err != nil {
 				return err
 			}
-			
+
 			// Skip the root directory itself
 			if relPath == "." {
 				return nil
 			}
-			
+
 			sourceItems[relPath] = true
 			return nil
 		})
@@ -249,28 +254,28 @@ func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStat
 		// For single files, we just check if the destination file matches
 		return nil // No extra files to handle for single file copy
 	}
-	
+
 	// Now check destination for extra files
 	var extraFiles []string
 	var extraDirs []string
-	
+
 	err = filepath.Walk(dst, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// If we can't access a file, skip it but don't fail
 			return nil
 		}
-		
+
 		// Get relative path from destination root
 		relPath, err := filepath.Rel(dst, path)
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip the root directory itself
 		if relPath == "." {
 			return nil
 		}
-		
+
 		// Check if this item exists in source
 		if !sourceItems[relPath] {
 			if info.IsDir() {
@@ -279,25 +284,25 @@ func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStat
 				return filepath.SkipDir
 			} else {
 				extraFiles = append(extraFiles, path)
-				
+
 				// Add to statistics
 				stats.ExtraFound++
 				stats.ExtraBytes += info.Size()
 			}
 		}
-		
+
 		return nil
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to walk destination directory '%s': %w", dst, err)
 	}
-	
+
 	// Add directory statistics
 	for range extraDirs {
 		stats.ExtraFound++
 	}
-	
+
 	// Report extra files found
 	if len(extraFiles) > 0 || len(extraDirs) > 0 {
 		fmt.Printf("\nExtra files/directories found in destination:\n")
@@ -308,13 +313,13 @@ func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStat
 			fmt.Printf("  DIR:  %s\n", dir)
 		}
 	}
-	
+
 	// Delete if requested
 	if syncOptions.DeleteExtra {
 		if len(extraFiles) > 0 || len(extraDirs) > 0 {
 			fmt.Printf("\nDeleting extra files/directories...\n")
 		}
-		
+
 		// Delete files first
 		for _, file := range extraFiles {
 			if err := os.Remove(file); err != nil {
@@ -324,7 +329,7 @@ func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStat
 				stats.ExtraDeleted++
 			}
 		}
-		
+
 		// Delete directories (they should be empty after deleting files)
 		for _, dir := range extraDirs {
 			if err := os.RemoveAll(dir); err != nil {
@@ -335,7 +340,7 @@ func handleExtraFiles(src, dst string, syncOptions *SyncOptions, stats *CopyStat
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -350,7 +355,7 @@ func showSummary(stats *CopyStats, syncOptions *SyncOptions) {
 		formatBytes(stats.BytesCopied),
 		totalTime.Round(time.Millisecond),
 		formatSpeed(overallSpeed))
-	
+
 	// Add extra files information if sync options are enabled
 	if syncOptions.DetectExtra {
 		if syncOptions.DeleteExtra {
@@ -358,12 +363,12 @@ func showSummary(stats *CopyStats, syncOptions *SyncOptions) {
 		} else {
 			fmt.Printf(", %d extra items found", stats.ExtraFound)
 		}
-		
+
 		if stats.ExtraBytes > 0 {
 			fmt.Printf(" (%s)", formatBytes(stats.ExtraBytes))
 		}
 	}
-	
+
 	fmt.Printf("\n")
 }
 
@@ -401,7 +406,7 @@ func copyFile(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error {
 	if err != nil {
 		return fmt.Errorf("failed to create destination file '%s': %w", dst, err)
 	}
-	defer dstFile.Close()
+	// We'll close explicitly before setting timestamps to avoid Windows resetting mtime on Close
 
 	// Copy file contents and measure time
 	startTime := time.Now()
@@ -411,8 +416,17 @@ func copyFile(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error {
 		return fmt.Errorf("failed to copy file content from '%s' to '%s': %w", src, dst, err)
 	}
 
-	// Set file modification time to match source
-	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
+	timeZero := time.Time{}
+	// Ensure data is flushed to disk and close the handle before setting timestamps.
+	if err := dstFile.Sync(); err != nil {
+		return fmt.Errorf("failed to flush destination file '%s': %w", dst, err)
+	}
+	if err := dstFile.Close(); err != nil {
+		return fmt.Errorf("failed to close destination file '%s': %w", dst, err)
+	}
+
+	// Set file modification time to match source AFTER the writing handle is closed.
+	if err := os.Chtimes(dst, timeZero, srcInfo.ModTime()); err != nil {
 		return fmt.Errorf("failed to set file times for '%s': %w", dst, err)
 	}
 
@@ -446,14 +460,21 @@ func needsUpdate(src, dst string, srcInfo os.FileInfo) (bool, error) {
 		return true, nil
 	}
 
-	// Compare modification times (truncate to second precision for cross-platform compatibility)
-	srcModTime := srcInfo.ModTime().Truncate(time.Second)
-	dstModTime := dstInfo.ModTime().Truncate(time.Second)
+	// Compare modification times with 5-second tolerance for filesystems like exFAT
+	// which have 2-second resolution (we use 5 seconds for safety margin)
+	srcModTime := srcInfo.ModTime()
+	dstModTime := dstInfo.ModTime()
 
-	if !srcModTime.Equal(dstModTime) {
+	timeDiff := srcModTime.Sub(dstModTime)
+	if timeDiff < 0 {
+		timeDiff = -timeDiff
+	}
+
+	// If the time difference is more than 5 seconds, consider it different
+	if timeDiff > 5*time.Second {
 		return true, nil
 	}
 
-	// Files are the same size and have the same modification time
+	// Files are the same size and have similar modification times
 	return false, nil
 }

@@ -207,8 +207,14 @@ func runTests() error {
 	}
 	fmt.Printf("  ✓ Verified: Multiple sources copied to new directory\n")
 
-	// Test 13: Multiple sources to existing file (should fail)
-	fmt.Println("\n16. Test 13: Multiple sources to existing file (should fail)")
+	// Test 13: Timestamp tolerance (exFAT compatibility)
+	fmt.Println("\n16. Test 13: Timestamp tolerance (exFAT compatibility)")
+	if err := testTimestampTolerance(joinRoot); err != nil {
+		return fmt.Errorf("timestamp tolerance test failed: %w", err)
+	}
+
+	// Test 14: Multiple sources to existing file (should fail)
+	fmt.Println("\n17. Test 14: Multiple sources to existing file (should fail)")
 	if err := createFile(joinRoot("existing_file.txt"), "existing file"); err != nil {
 		return fmt.Errorf("failed to create existing file: %w", err)
 	}
@@ -221,7 +227,7 @@ func runTests() error {
 	fmt.Printf("  Expected error output: %s", string(output2))
 
 	// Clean up test directories
-	fmt.Println("\n17. Cleaning up test directories...")
+	fmt.Println("\n18. Cleaning up test directories...")
 	cleanupTestDirs(joinRoot)
 	os.RemoveAll(joinRoot("existing_dir"))
 	os.RemoveAll(joinRoot("file_dest_dir"))
@@ -232,6 +238,7 @@ func runTests() error {
 	os.RemoveAll(joinRoot("multi_dest"))
 	os.RemoveAll(joinRoot("new_multi_dest"))
 	os.RemoveAll(joinRoot("existing_file.txt"))
+	os.RemoveAll(joinRoot("timestamp_test"))
 
 	return nil
 }
@@ -419,5 +426,101 @@ func runMultiSmartcopy(binPath string, args []string) error {
 		return fmt.Errorf("smartcopy failed: %v", err)
 	}
 
+	return nil
+}
+
+func testTimestampTolerance(joinRoot func(parts ...string) string) error {
+	// Create test directories
+	srcDir := joinRoot("timestamp_test", "src")
+	dstDir := joinRoot("timestamp_test", "dst")
+	
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		return fmt.Errorf("failed to create timestamp test src dir: %w", err)
+	}
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return fmt.Errorf("failed to create timestamp test dst dir: %w", err)
+	}
+
+	// Create source file
+	srcFile := joinRoot("timestamp_test", "src", "tolerance_test.txt")
+	dstFile := joinRoot("timestamp_test", "dst", "tolerance_test.txt")
+	
+	if err := createFile(srcFile, "Test content for timestamp tolerance"); err != nil {
+		return fmt.Errorf("failed to create source file: %w", err)
+	}
+
+	// Get source file time
+	srcInfo, err := os.Stat(srcFile)
+	if err != nil {
+		return fmt.Errorf("failed to get source file info: %w", err)
+	}
+	srcTime := srcInfo.ModTime()
+
+	// Create destination file with same content but slightly different timestamp (within 5-second tolerance)
+	if err := createFile(dstFile, "Test content for timestamp tolerance"); err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+
+	// Set destination file time to be 2 seconds different (simulating exFAT behavior)
+	dstTime := srcTime.Add(2 * time.Second)
+	if err := os.Chtimes(dstFile, dstTime, dstTime); err != nil {
+		return fmt.Errorf("failed to set destination file time: %w", err)
+	}
+
+	fmt.Printf("  Source file time:      %s\n", srcTime.Format(time.RFC3339Nano))
+	fmt.Printf("  Destination file time: %s\n", dstTime.Format(time.RFC3339Nano))
+	fmt.Printf("  Time difference:       2 seconds (within 5-second tolerance)\n")
+
+	// Run smartcopy - should skip the file since it's within tolerance
+	fmt.Println("Running: smartcopy timestamp_test/src/tolerance_test.txt timestamp_test/dst/tolerance_test.txt")
+	if err := runSmartcopy(joinRoot("smartcopy.exe"), srcFile, dstFile); err != nil {
+		return fmt.Errorf("timestamp tolerance copy failed: %w", err)
+	}
+
+	// Verify that destination time wasn't changed (file was skipped)
+	dstInfoAfter, err := os.Stat(dstFile)
+	if err != nil {
+		return fmt.Errorf("failed to get destination file info after copy: %w", err)
+	}
+	
+	if !dstInfoAfter.ModTime().Equal(dstTime) {
+		return fmt.Errorf("destination file was modified when it should have been skipped due to timestamp tolerance")
+	}
+
+	fmt.Printf("  ✓ Verified: File was correctly skipped due to timestamp tolerance\n")
+
+	// Test with time difference greater than 5 seconds (should copy)
+	fmt.Println("Testing with 10-second difference (should copy)...")
+	
+	// Reset destination file time to 10 seconds different
+	dstTime10 := srcTime.Add(10 * time.Second)
+	if err := os.Chtimes(dstFile, dstTime10, dstTime10); err != nil {
+		return fmt.Errorf("failed to set destination file time for 10s test: %w", err)
+	}
+
+	fmt.Printf("  New destination time: %s (10 seconds difference)\n", dstTime10.Format(time.RFC3339Nano))
+
+	// Run smartcopy - should copy the file since it's beyond tolerance
+	if err := runSmartcopy(joinRoot("smartcopy.exe"), srcFile, dstFile); err != nil {
+		return fmt.Errorf("timestamp beyond tolerance copy failed: %w", err)
+	}
+
+	// Verify that destination time was updated (file was copied)
+	dstInfoFinal, err := os.Stat(dstFile)
+	if err != nil {
+		return fmt.Errorf("failed to get final destination file info: %w", err)
+	}
+	
+	// The destination time should now match the source time (within a small margin due to precision)
+	finalTimeDiff := dstInfoFinal.ModTime().Sub(srcTime)
+	if finalTimeDiff < 0 {
+		finalTimeDiff = -finalTimeDiff
+	}
+	
+	if finalTimeDiff > time.Second {
+		return fmt.Errorf("destination file time not properly updated after copy beyond tolerance")
+	}
+
+	fmt.Printf("  ✓ Verified: File was correctly copied when beyond tolerance\n")
 	return nil
 }
