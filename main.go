@@ -10,7 +10,7 @@ import (
 )
 
 // Version of the utility
-const Version = "1.2.1"
+const Version = "1.4.0"
 
 // CopyStats tracks statistics during the copy operation
 type CopyStats struct {
