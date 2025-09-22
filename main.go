@@ -29,6 +29,20 @@ type SyncOptions struct {
 	DeleteExtra bool
 }
 
+// sanitizeFATTime clamps timestamps to the valid FAT/exFAT range to avoid invalid-date failures.
+// FAT/exFAT valid range is approximately 1980-01-01 00:00:00 to 2107-12-31 23:59:58 (2-second resolution).
+func sanitizeFATTime(t time.Time) time.Time {
+	min := time.Date(1980, time.January, 1, 0, 0, 0, 0, time.Local)
+	max := time.Date(2107, time.December, 31, 23, 59, 58, 0, time.Local)
+	if t.Before(min) {
+		return min
+	}
+	if t.After(max) {
+		return max
+	}
+	return t
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -182,9 +196,9 @@ func copyDirectory(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error
 		}
 	}
 
-	// After all contents are copied, set directory modification time to match source
-	timeZero := time.Time{}
-	if err := os.Chtimes(dst, timeZero, srcInfo.ModTime()); err != nil {
+	// After all contents are copied, set directory times to a sanitized source time
+	m := sanitizeFATTime(srcInfo.ModTime())
+	if err := os.Chtimes(dst, m, m); err != nil {
 		return fmt.Errorf("failed to set directory times for '%s': %w", dst, err)
 	}
 
@@ -416,7 +430,6 @@ func copyFile(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error {
 		return fmt.Errorf("failed to copy file content from '%s' to '%s': %w", src, dst, err)
 	}
 
-	timeZero := time.Time{}
 	// Ensure data is flushed to disk and close the handle before setting timestamps.
 	if err := dstFile.Sync(); err != nil {
 		return fmt.Errorf("failed to flush destination file '%s': %w", dst, err)
@@ -425,8 +438,9 @@ func copyFile(src, dst string, srcInfo os.FileInfo, stats *CopyStats) error {
 		return fmt.Errorf("failed to close destination file '%s': %w", dst, err)
 	}
 
-	// Set file modification time to match source AFTER the writing handle is closed.
-	if err := os.Chtimes(dst, timeZero, srcInfo.ModTime()); err != nil {
+	// Set file times to match source AFTER the writing handle is closed, using sanitized time.
+	m := sanitizeFATTime(srcInfo.ModTime())
+	if err := os.Chtimes(dst, m, m); err != nil {
 		return fmt.Errorf("failed to set file times for '%s': %w", dst, err)
 	}
 
